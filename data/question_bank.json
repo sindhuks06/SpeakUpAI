@@ -1,0 +1,16 @@
+{
+    "HR": [
+        "Tell me about yourself.",
+        "Why do you want to work here?",
+        "What is your greatest strength?"
+    ],
+    "Technical": [
+        "Explain a project you worked on.",
+        "What is polymorphism?",
+        "How do you handle exceptions in Python?"
+    ],
+    "Stress": [
+        "You failed a project. How do you handle it?",
+        "Describe a conflict you had with a team member."
+    ]
+}
