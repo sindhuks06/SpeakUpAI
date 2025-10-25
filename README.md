@@ -1,5 +1,5 @@
 # SpeakupAI
-# 💬 SpeakupAI - AI Interviewer & Confidence Coach
+# 💬  SpeakupAI- AI Interviewer & Confidence Coach
 
 **Hackathon Project | 24-hour MVP**
 
