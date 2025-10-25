@@ -1,186 +1,324 @@
-import streamlit as st
-from textblob import TextBlob
+import io
+import re
+import tempfile
 import random
-from PyPDF2 import PdfReader
-import os
-import json
-from utils.feedback import analyze_text
+from typing import List
 
-# ---------- PAGE CONFIG ----------
-st.set_page_config(
-    page_title="🎙 SpeakUpAI - Your AI Co-Interviewer",
-    page_icon="💬",
-    layout="wide"
-)
+import streamlit as st
+import streamlit.components.v1 as components
+from gtts import gTTS
+from io import BytesIO
+from streamlit_webrtc import webrtc_streamer
 
-# ---------- USER DATA FILE ----------
-USER_DATA_FILE = "user_data.json"
-if os.path.exists(USER_DATA_FILE):
-    with open(USER_DATA_FILE, "r") as f:
-        user_data = json.load(f)
-else:
-    user_data = {}
+from db_manager import save_interview_qa, get_previous_qa, transcribe_audio
 
-# ---------- SESSION STATE ----------
-if "user_name" not in st.session_state:
-    st.session_state.user_name = "Guest"
-if "chat" not in st.session_state:
-    st.session_state.chat = []
-if "feedback" not in st.session_state:
-    st.session_state.feedback = []
-if "session_count" not in st.session_state:
-    st.session_state.session_count = 1
+# ---------- Helper: Sentiment Analysis ----------
+from textblob import TextBlob
 
-# ---------- CUSTOM CSS ----------
-st.markdown("""
-<style>
-body {
-    background: linear-gradient(rgba(0,0,0,0.4), rgba(0,0,0,0.4)),
-                url('https://images.unsplash.com/photo-1581091215361-2b61f1a4c64b?ixlib=rb-4.0.3&auto=format&fit=crop&w=1950&q=80');
-    background-size: cover;
-    background-attachment: fixed;
-    background-repeat: no-repeat;
-    background-position: center;
-}
-.header {
-    text-align:center;
-    padding:20px;
-    border-radius:20px;
-    color:white;
-    font-size:3em;
-    font-weight:bold;
-    background: linear-gradient(90deg, #6a11cb, #2575fc);
-    box-shadow: 0px 5px 20px rgba(0,0,0,0.4);
-    margin-bottom:15px;
-}
-.subheader {
-    text-align:center;
-    font-size:1.4em;
-    color:#fff;
-    margin-bottom:20px;
-}
-.chat-box {
-    background: rgba(255,255,255,0.85);
-    border-radius: 15px;
-    padding: 10px;
-    margin-bottom: 10px;
-}
-.assistant-msg {
-    border-left: 4px solid #6a11cb;
-}
-.user-msg {
-    border-left: 4px solid #2575fc;
-}
-.feedback-box {
-    background: rgba(255,255,255,0.85);
-    border-radius: 15px;
-    padding: 10px;
-    margin-bottom: 10px;
-}
-</style>
-""", unsafe_allow_html=True)
+def sentiment_polarity(text: str) -> float:
+    """Returns sentiment polarity between -1 (negative) and 1 (positive)."""
+    if not text or text.strip() == "":
+        return 0.0
+    blob = TextBlob(text)
+    return blob.sentiment.polarity
 
-# ---------- GREETING ----------
-st.markdown('<div class="header">💬 SpeakUpAI</div>', unsafe_allow_html=True)
-st.markdown(f'<div class="subheader">Welcome {st.session_state.user_name}! Session #{st.session_state.session_count}</div>', unsafe_allow_html=True)
+def count_fillers(text: str) -> int:
+    """Counts common filler words like 'um', 'uh', 'like', etc."""
+    fillers = ["um", "uh", "like", "you know", "actually", "basically", "literally"]
+    text_lower = text.lower()
+    return sum(text_lower.count(f) for f in fillers)
 
-# ---------- RESUME UPLOAD ----------
+
+
+st.set_page_config(page_title="💬 SpeakUpAI", layout="centered")
+
+
+def speak_text_bytes(text: str) -> BytesIO:
+    """Return an in-memory mp3 BytesIO for the given text using gTTS."""
+    tts = gTTS(text)
+    buf = BytesIO()
+    tts.write_to_fp(buf)
+    buf.seek(0)
+    return buf
+
+
+st.title("💬 SpeakUpAI - AI Mock Interviewer")
+
+# ---------- session state setup ----------
+if "user_id" not in st.session_state:
+    st.session_state.user_id = "demo_user"
+if "interview_active" not in st.session_state:
+    st.session_state.interview_active = False
+if "questions" not in st.session_state:
+    st.session_state.questions = []
+
+
+# ---------- Resume upload ----------
 st.subheader("📄 Upload your resume (optional)")
 uploaded_file = st.file_uploader("Upload PDF resume", type=["pdf"])
 resume_text = ""
 if uploaded_file is not None:
-    pdf = PdfReader(uploaded_file)
-    for page in pdf.pages:
-        resume_text += page.extract_text() or ""
-    st.success("Resume uploaded successfully!")
-    st.text_area("Resume Preview", resume_text, height=200)
+    try:
+        pdf_bytes = uploaded_file.read()
+        from PyPDF2 import PdfReader
 
-# ---------- INTERVIEW MODE ----------
-mode = st.selectbox(
-    "🎯 Choose interview mode:",
-    ["HR", "Technical", "Stress"]
-)
+        pdf = PdfReader(io.BytesIO(pdf_bytes))
+        pages = []
+        for page in pdf.pages:
+            pages.append(page.extract_text() or "")
+        resume_text = " ".join(pages).strip()
+        st.success("Resume uploaded")
+        st.text_area("Resume preview (first 2000 chars)", resume_text[:2000], height=180)
+    except Exception as e:
+        st.error(f"Could not parse resume: {e}")
 
-# ---------- QUESTION BANK ----------
-questions = {
-    "HR": ["Tell me about yourself.", "Why do you want to work here?", "What is your greatest strength?"],
-    "Technical": ["Explain a project you worked on.", "What is polymorphism?", "How do you handle exceptions in Python?"],
-    "Stress": ["You failed a project. How do you handle it?", "Describe a conflict you had with a team member."]
+
+# ---------- Interview mode and question bank ----------
+mode = st.selectbox("🎯 Choose interview mode:", ["HR Interview", "Technical Round", "Stress Interview"])
+
+QUESTION_BANK = {
+    "HR Interview": [
+        "Tell me about yourself.",
+        "What are your strengths and weaknesses?",
+        "Why should we hire you?",
+        "Describe a time you solved a difficult problem.",
+        "Where do you see yourself in 5 years?",
+        "How do you handle feedback?",
+        "What motivates you?",
+    ],
+    "Technical Round": [
+        "Explain OOP concepts in simple terms.",
+        "What is a REST API?",
+        "How does Python manage memory?",
+        "Describe how you would design a scalable web service.",
+        "Explain a project where you used algorithms or data structures.",
+        "How do you test and debug your code?",
+        "What tradeoffs do you consider when optimizing performance?",
+    ],
+    "Stress Interview": [
+        "Why are you not better than others?",
+        "Convince me you’re not wasting my time.",
+        "What will you do if your project fails?",
+        "Why should we trust you to lead?",
+        "Tell me something you regret.",
+        "Explain why this company should hire you immediately.",
+        "What would you do differently in your last role?",
+    ],
 }
 
-# ---------- INITIAL QUESTION ----------
-if len(st.session_state.chat) == 0:
-    first_q = random.choice(questions[mode])
-    st.session_state.chat.append(("assistant", first_q))
 
-# ---------- DISPLAY CHAT ----------
-for role, text in st.session_state.chat:
-    avatar = "https://img.icons8.com/ios-filled/50/000000/robot.png" if role == "assistant" else "https://img.icons8.com/ios-filled/50/000000/user.png"
-    cls = "assistant-msg" if role == "assistant" else "user-msg"
-    st.markdown(f"""
-        <div class="chat-box {cls}">
-            <img class="avatar" src="{avatar}" style="width:25px;height:25px;margin-right:10px;vertical-align:middle;">
-            <span>{text}</span>
-        </div>
-    """, unsafe_allow_html=True)
+# ---------- Control panel: start / reset ----------
+col1, col2 = st.columns([3, 1])
+with col1:
+    start = st.button("Start Interview")
+with col2:
+    reset = st.button("Reset")
 
-# ---------- TEXT INPUT ----------
-prompt = st.chat_input("Type your answer here...")
+if reset:
+    st.session_state.interview_active = False
+    st.session_state.questions = []
+    st.session_state.q_index = 0
+    st.session_state.answers = []
+    st.session_state.feedback = []
+    st.success("Interview reset")
 
-if prompt:
-    # Add user answer
-    st.session_state.chat.append(("user", prompt))
-
-    # Analyze feedback
-    feedback = analyze_text(prompt)
-    st.session_state.feedback.append(feedback)
-
-    # Next question
-    next_q = random.choice(questions[mode])
-    st.session_state.chat.append(("assistant", next_q))
-
-# ---------- FEEDBACK DISPLAY ----------
-st.divider()
-st.subheader("📊 Live Feedback Summary")
-
-if st.session_state.feedback:
-    last = st.session_state.feedback[-1]
-    # Color code confidence
-    if last["confidence_score"] >= 75:
-        color = "#4CAF50"
-    elif last["confidence_score"] >= 50:
-        color = "#FFC107"
+if start and not st.session_state.interview_active:
+    # Prepare 7 questions
+    if resume_text:
+        # personalize first question if possible
+        tokens = re.findall(r"\w+", resume_text)
+        first = f"Can you tell me about your experience with {tokens[0]}?" if tokens else None
     else:
-        color = "#F44336"
+        first = None
 
-    st.markdown(f"""
-        <div class="feedback-box">
-            <b>Tone:</b> {last['tone']}<br>
-            <b>Confidence Score:</b> <span style="color:{color}; font-weight:bold">{last['confidence_score']}%</span><br>
-            <b>Filler Words:</b> {last['fillers']}<br>
-            <b>Hesitation Phrases:</b> {last['hesitation']}<br>
-            <b>Confident Phrases:</b> {last['confident_phrases']}<br>
-            <b>Sentence Structure:</b> {last['sentence_structure']}<br>
-            <div style='margin-top:10px; background:#ddd; border-radius:5px;'>
-                <div style='width:{last['confidence_score']}%; background: linear-gradient(to right, #6a11cb, #2575fc); padding:5px; border-radius:5px; text-align:center; color:white;'>
-                    {last['confidence_score']}%
-                </div>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
+    pool = QUESTION_BANK.get(mode, [])[:]
+    random.shuffle(pool)
+    # Ensure deterministic length 7
+    questions = []
+    if first:
+        questions.append(first)
+    # fill the rest from pool
+    for q in pool:
+        if len(questions) >= 7:
+            break
+        if q not in questions:
+            questions.append(q)
+    # if still fewer than 7 (unlikely), pad with repeats
+    while len(questions) < 7:
+        questions.append(random.choice(pool or ["Tell me about yourself."]))
 
-# ---------- FOOTER ----------
-st.markdown("""
-<div style="
-    position: relative;
-    bottom: 0;
-    width: 100%;
-    background-color: rgba(0,0,0,0.6);
-    color: white;
-    text-align: center;
-    padding: 10px;
-    font-weight: bold;
-">
-🚀 Built with ❤ by Team TechTitans | TERRATHON 5.0 2025
-</div>
-""", unsafe_allow_html=True)
+    st.session_state.questions = questions[:7]
+    st.session_state.q_index = 0
+    st.session_state.answers = []
+    st.session_state.feedback = []
+    st.session_state.interview_active = True
+    try:
+        st.experimental_rerun()
+    except AttributeError:
+        # Streamlit may not expose experimental_rerun in this version; toggle a session key to force rerun
+        st.session_state["_rerun_flag"] = not st.session_state.get("_rerun_flag", False)
+
+
+# ---------- Interview runtime ----------
+from audio_recorder_streamlit import audio_recorder
+import tempfile
+import os
+import time
+
+if "answers" not in st.session_state:
+    st.session_state.answers = []
+if "interview_active" not in st.session_state:
+    st.session_state.interview_active = False
+if "q_index" not in st.session_state:
+    st.session_state.q_index = 0
+
+if st.session_state.interview_active:
+    questions = st.session_state.questions
+    q_idx = st.session_state.q_index
+
+    if q_idx < len(questions):
+        current_q = questions[q_idx]
+        st.markdown(f"### Question {q_idx + 1} of {len(questions)}")
+        st.write(current_q)
+
+        # 🔊 AI speaks the question
+        try:
+            st.audio(speak_text_bytes(current_q), format="audio/mp3")
+        except Exception:
+            st.warning("Audio playback unavailable.")
+
+        st.subheader("🎤 Record your answer")
+
+        audio_bytes = audio_recorder(
+            pause_threshold=1.2,
+            sample_rate=44100,
+            icon_size="2x",
+        )
+
+        if audio_bytes:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmpfile:
+                tmpfile.write(audio_bytes)
+                tmp_path = tmpfile.name
+
+            user_text, confidence = transcribe_audio(tmp_path)
+            os.remove(tmp_path)
+
+            sentiment_score = sentiment_polarity(user_text)
+            tone = (
+                "Confident / Positive" if sentiment_score > 0.2 else
+                "Hesitant / Negative" if sentiment_score < -0.2 else
+                "Neutral"
+            )
+            filler_count = count_fillers(user_text)
+
+            # Save the answer for summary
+            st.session_state.answers.append({
+                "question": current_q,
+                "answer": user_text,
+                "confidence": confidence,
+                "tone": tone,
+                "sentiment": sentiment_score,
+                "fillers": filler_count,
+            })
+
+            st.success("✅ Answer recorded and transcribed successfully!")
+            st.write(f"*Transcript:* {user_text}")
+            st.write(f"*Confidence:* {confidence:.2f}")
+            st.write(f"*Tone:* {tone}")
+            st.write(f"*Filler words:* {filler_count}")
+
+            # ✅ Next Question Button
+            if st.button("➡ Next Question"):
+                st.session_state.q_index += 1
+                if st.session_state.q_index >= len(st.session_state.questions):
+                    st.session_state.interview_active = False
+                st.rerun()
+
+    else:
+        # ✅ End of interview - Show Summary
+        st.session_state.interview_active = False
+        st.subheader("📋 Interview Summary Report")
+
+        total_conf = sum(a["confidence"] for a in st.session_state.answers) / len(st.session_state.answers)
+        total_fillers = sum(a["fillers"] for a in st.session_state.answers)
+        avg_sent = sum(a["sentiment"] for a in st.session_state.answers) / len(st.session_state.answers)
+
+        st.write(f"*Average Transcript Confidence:* {total_conf:.2f}")
+        st.write(f"*Total Filler Words:* {total_fillers}")
+        st.write(f"*Average Sentiment:* {avg_sent:.2f}")
+
+        st.divider()
+
+        for i, a in enumerate(st.session_state.answers, 1):
+            st.markdown(f"*Q{i}. {a['question']}*")
+            st.write(a['answer'])
+            st.caption(f"Confidence: {a['confidence']:.2f} | Tone: {a['tone']} | Fillers: {a['fillers']}")
+
+        st.divider()
+
+        # 💡 AI Improvement Suggestions
+        improvements = []
+        if total_conf < 0.6:
+            improvements.append("Try to speak more clearly and maintain consistent volume.")
+        if total_fillers > 5:
+            improvements.append("Reduce filler words like 'um', 'uh', 'like'.")
+        if avg_sent < 0:
+            improvements.append("Try to sound more positive or confident in your tone.")
+        if not improvements:
+            improvements.append("Excellent delivery and tone! Keep practicing structured answers.")
+
+        st.subheader("💡 Feedback & Improvement Suggestions")
+        for tip in improvements:
+            st.write(f"• {tip}")
+
+        # Reset button for new session
+        if st.button("🔁 Start New Interview"):
+            for key in ["answers", "q_index", "interview_active", "questions"]:
+                st.session_state.pop(key, None)
+            st.success("New session started!")
+            st.rerun()
+
+
+
+# ---------- When interview ends: show report ----------
+if not st.session_state.get("interview_active", False) and st.session_state.get("answers"):
+    st.divider()
+    st.subheader("📋 Interview Summary Report")
+
+    answers = st.session_state.answers
+    # Aggregate metrics
+    avg_conf = sum(a.get("transcript_confidence", 0) for a in answers) / max(1, len(answers))
+    total_fillers = sum(a.get("filler_count", 0) for a in answers)
+    avg_sentiment = sum(a.get("sentiment_score", 0) for a in answers) / max(1, len(answers))
+
+    st.metric("Average Transcript Confidence", f"{avg_conf:.2f}")
+    st.metric("Total Filler Words", f"{total_fillers}")
+    st.metric("Average Sentiment", f"{avg_sentiment:.2f}")
+
+    for i, a in enumerate(answers, 1):
+        st.markdown(f"*Q{i}. {a['question']}*")
+        st.write(a["answer"])
+        st.write(f"Confidence: {a['transcript_confidence']:.2f} | Tone: {a['tone']} | Fillers: {a['filler_count']}")
+
+    # Offer a downloadable text report
+    report_lines = ["Interview Summary\n"]
+    report_lines.append(f"User: {st.session_state.user_id}\n")
+    report_lines.append(f"Mode: {mode}\n")
+    report_lines.append(f"Average Confidence: {avg_conf:.2f}\n")
+    report_lines.append(f"Total Fillers: {total_fillers}\n")
+    report_lines.append("\nDetails:\n")
+    for i, a in enumerate(answers, 1):
+        report_lines.append(f"Q{i}: {a['question']}\n")
+        report_lines.append(f"A{i}: {a['answer']}\n")
+        report_lines.append(f"Confidence: {a['transcript_confidence']:.2f}, Tone: {a['tone']}, Fillers: {a['filler_count']}\n\n")
+
+    report_text = "".join(report_lines)
+    st.download_button("Download summary report", report_text, file_name="interview_report.txt")
+
+    # Also show previous Q&A from DB
+    try:
+        prev_qa = get_previous_qa(st.session_state.user_id)
+        st.subheader("📜 Previous Answers (from DB)")
+        st.text(prev_qa)
+    except Exception:
+        st.info("No previous Q&A available or DB query failed.")
