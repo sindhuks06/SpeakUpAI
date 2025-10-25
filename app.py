@@ -1,31 +1,63 @@
 import streamlit as st
-import json
-from utils.feedback import analyze_text
-# from utils.ai_helpers import ask_gpt  # Commented out to avoid API calls
+from ai_logic import analyze_response, generate_adaptive_question
+from db_manager import get_personalized_context, save_conversation_context, transcribe_audio
 
-# Load question bank
-with open("data/question_bank.json") as f:
-    question_bank = json.load(f)
+# --- Page config ---
+st.set_page_config(page_title="🎤 Rehearsal Room", page_icon="🎭")
 
-st.title("💬 RehearsalRoom - AI Interviewer")
+# --- Title ---
+st.title("🎤 Rehearsal Room — Your AI Co-Interviewer")
 
-mode = st.selectbox("Choose Interview Type:", ["HR", "Technical", "Stress"])
-questions = question_bank[mode]
+# --- Initialize session state ---
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-conversation = []
+# --- Display previous messages ---
+for msg in st.session_state.messages:
+    st.chat_message(msg["role"]).write(msg["content"])
 
-for i, q in enumerate(questions):
-    st.write(f"**AI:** {q}")
-    user_answer = st.text_input("Your Answer:", key=f"answer_{i}")
-    
-    if user_answer:
-        # Save the user's answer
-        conversation.append({"role": "user", "content": user_answer})
-        
-        # Feedback from local analysis
-        feedback = analyze_text(user_answer)
-        st.write(f"**Feedback:** Tone: {feedback['tone']}, Filler Words: {feedback['fillers']}, Confidence Score: {feedback['confidence']}")
-        
-        # Placeholder AI feedback (no API call)
-        ai_followup = "AI feedback placeholder (API skipped for testing)"
-        st.write(f"**AI:** {ai_followup}")
+# --- Audio Input Section ---
+st.write("### 🎙️ Record or Upload Your Answer")
+audio_file = st.file_uploader("Upload your answer (MP3/WAV)", type=["mp3", "wav"])
+
+if audio_file:
+    # Transcribe audio (placeholder or P3’s real Whisper function)
+    user_text = transcribe_audio(audio_file)
+
+    # Show user message
+    st.chat_message("user").write(user_text)
+    st.session_state.messages.append({"role": "user", "content": user_text})
+
+    # Analyze user response
+    analysis = analyze_response(user_text)
+    save_conversation_context(user_text, analysis)
+
+    st.write("### 📊 Feedback")
+    st.json(analysis)
+
+    # Generate next adaptive question
+    context = get_personalized_context()
+    next_q = generate_adaptive_question(context, user_text)
+
+    st.chat_message("assistant").write(next_q)
+    st.session_state.messages.append({"role": "assistant", "content": next_q})
+
+# --- Chat Input Section (Typing) ---
+if user_input := st.chat_input("Or type your answer here..."):
+    # Show user's message
+    st.chat_message("user").write(user_input)
+    st.session_state.messages.append({"role": "user", "content": user_input})
+
+    # Analyze user response
+    analysis = analyze_response(user_input)
+    save_conversation_context(user_input, analysis)
+
+    st.write("### 📊 Feedback")
+    st.json(analysis)
+
+    # Generate next adaptive question
+    context = get_personalized_context()
+    next_q = generate_adaptive_question(context, user_input)
+
+    st.chat_message("assistant").write(next_q)
+    st.session_state.messages.append({"role": "assistant", "content": next_q})
