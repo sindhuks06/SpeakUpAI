@@ -1,9 +1,11 @@
 # db_manager.py
+
 import os
 import random
+import time
+from datetime import datetime
 from openai import OpenAI
 import chromadb
-from analysis_schema import AnalysisFeedback
 
 # Initialize OpenAI
 client_ai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -22,35 +24,73 @@ def transcribe_audio(audio_path: str) -> tuple[str, float]:
     try:
         with open(audio_path, "rb") as f:
             transcript = client_ai.audio.transcriptions.create(
-                model="whisper-1",
+                model="gpt-4o-transcribe",  # faster and better
                 file=f
             )
         text = transcript.text.strip()
-        # Simple heuristic for confidence
-        words = text.split()
-        confidence = min(1.0, max(0.5, len(words)/20))
+        confidence = min(1.0, max(0.5, len(text.split()) / 25))
         return text, confidence
     except Exception as e:
         print("Transcription error:", e)
         return "", 0.0
 
-def save_interview_qa(user_id: str, question: str, answer: str, confidence: float):
-    """Save a Q&A entry into the database"""
-    doc_id = f"{user_id}_{random.randint(1000,9999)}"
+
+def save_interview_qa(
+    user_id: str,
+    question: str,
+    answer: str,
+    confidence: float,
+    feedback: dict = None
+):
+    """
+    Save a Q&A entry along with feedback into ChromaDB.
+    Feedback example:
+    {
+        "tone": "Positive",
+        "fillers": 2,
+        "confidence_score": 8,
+        "clarity": 7
+    }
+    """
+    doc_id = f"{user_id}_{int(time.time())}_{random.randint(1000, 9999)}"
+    now = datetime.utcnow().isoformat()
+
+    metadata = {
+        "user_id": user_id,
+        "confidence": confidence,
+        "timestamp": now
+    }
+    if feedback:
+        metadata.update(feedback)
+
     collection.add(
         ids=[doc_id],
-        documents=[f"Q: {question}\nA: {answer}\nConfidence: {confidence}"],
-        metadatas=[{"user_id": user_id}]
+        documents=[f"Q: {question}\nA: {answer}"],
+        metadatas=[metadata]
     )
 
-def get_previous_qa(user_id: str):
-    """Retrieve previous answers for a user"""
+
+def get_previous_qa(user_id: str, limit: int = 5):
+    """
+    Retrieve previous answers and feedback for a user sorted by relevance.
+    """
     results = collection.query(
-        query_texts=["interview history"],
-        n_results=5,
+        query_texts=["mock interview"],
+        n_results=limit,
         where={"user_id": user_id}
     )
-    docs = results["documents"]
-    if not docs or not docs[0]:
+
+    docs = results.get("documents", [[]])[0]
+    metas = results.get("metadatas", [[]])[0]
+
+    if not docs:
         return "No previous data found."
-    return "\n\n".join(docs[0])
+
+    history = []
+    for doc, meta in zip(docs, metas):
+        feedback_info = ", ".join(f"{k}: {v}" for k, v in meta.items() if k not in ["user_id", "timestamp"])
+        history.append(
+            f"{doc}\nFeedback: {feedback_info}\nTime: {meta.get('timestamp','')}\n"
+        )
+
+    return "\n\n".join(history)
