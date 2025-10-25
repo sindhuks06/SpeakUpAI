@@ -1,63 +1,128 @@
 import streamlit as st
-from ai_logic import analyze_response, generate_adaptive_question
-from db_manager import get_personalized_context, save_conversation_context, transcribe_audio
+from textblob import TextBlob
+import random
 
-# --- Page config ---
-st.set_page_config(page_title="🎤 SpeakupAI", page_icon="🎭")
+# ---------- PAGE CONFIG ----------
+st.set_page_config(
+    page_title="🎙 SpeakUpAI - Your AI Co-Interviewer",
+    page_icon="💬",
+    layout="centered"
+)
 
-# --- Title ---
-st.title("🎤 SpeakupAI — Your AI Co-Interviewer")
+# ---------- HEADER ----------
+st.markdown("""
+    <style>
+        .title {
+            text-align: center;
+            font-size: 2.5em;
+            color: #ffffff;
+            background: linear-gradient(90deg, #6a11cb, #2575fc);
+            padding: 0.6em;
+            border-radius: 10px;
+            margin-bottom: 1em;
+        }
+        .sub {
+            text-align: center;
+            font-size: 1.2em;
+            color: #666;
+            margin-bottom: 1.5em;
+        }
+    </style>
+    <div class="title">💬 SpeakUpAI</div>
+    <div class="sub">Your personal AI interviewer & confidence coach</div>
+""", unsafe_allow_html=True)
 
-# --- Initialize session state ---
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+# ---------- SELECT INTERVIEW MODE ----------
+mode = st.selectbox(
+    "🎯 Choose interview mode:",
+    ["HR Interview", "Technical Round", "Stress Interview"]
+)
 
-# --- Display previous messages ---
-for msg in st.session_state.messages:
-    st.chat_message(msg["role"]).write(msg["content"])
+st.divider()
 
-# --- Audio Input Section ---
-st.write("### 🎙️ Record or Upload Your Answer")
-audio_file = st.file_uploader("Upload your answer (MP3/WAV)", type=["mp3", "wav"])
+# ---------- QUESTION BANK ----------
+questions = {
+    "HR Interview": [
+        "Tell me about yourself.",
+        "What are your strengths and weaknesses?",
+        "Why should we hire you?"
+    ],
+    "Technical Round": [
+        "Explain OOP concepts in simple terms.",
+        "What is a REST API?",
+        "How does Python manage memory?"
+    ],
+    "Stress Interview": [
+        "Why are you not better than others?",
+        "Convince me you’re not wasting my time.",
+        "What will you do if your project fails?"
+    ]
+}
 
-if audio_file:
-    # Transcribe audio (placeholder or P3’s real Whisper function)
-    user_text = transcribe_audio(audio_file)
+# ---------- SESSION STATE ----------
+if "chat" not in st.session_state:
+    st.session_state.chat = []
+if "feedback" not in st.session_state:
+    st.session_state.feedback = []
 
-    # Show user message
-    st.chat_message("user").write(user_text)
-    st.session_state.messages.append({"role": "user", "content": user_text})
+# ---------- DISPLAY CHAT ----------
+for role, text in st.session_state.chat:
+    with st.chat_message(role):
+        st.write(text)
 
-    # Analyze user response
-    analysis = analyze_response(user_text)
-    save_conversation_context(user_text, analysis)
+# ---------- ASK QUESTION ----------
+if len(st.session_state.chat) == 0:
+    first_q = random.choice(questions[mode])
+    st.session_state.chat.append(("assistant", first_q))
+    st.rerun()
 
-    st.write("### 📊 Feedback")
-    st.json(analysis)
+# ---------- USER INPUT ----------
+prompt = st.chat_input("Your response...")
 
-    # Generate next adaptive question
-    context = get_personalized_context()
-    next_q = generate_adaptive_question(context, user_text)
+if prompt:
+    # Add user message
+    st.session_state.chat.append(("user", prompt))
 
-    st.chat_message("assistant").write(next_q)
-    st.session_state.messages.append({"role": "assistant", "content": next_q})
+    # Simple tone analysis using TextBlob
+    sentiment = TextBlob(prompt).sentiment.polarity
+    if sentiment > 0.2:
+        tone = "😊 Confident / Positive"
+    elif sentiment < -0.2:
+        tone = "😟 Hesitant / Negative"
+    else:
+        tone = "😐 Neutral"
 
-# --- Chat Input Section (Typing) ---
-if user_input := st.chat_input("Or type your answer here..."):
-    # Show user's message
-    st.chat_message("user").write(user_input)
-    st.session_state.messages.append({"role": "user", "content": user_input})
+    # Generate feedback
+    feedback = {
+        "tone": tone,
+        "confidence": round((sentiment + 1) / 2 * 100, 1),
+        "filler_words": sum(prompt.lower().count(w) for w in ["um", "uh", "like", "you know"])
+    }
+    st.session_state.feedback.append(feedback)
 
-    # Analyze user response
-    analysis = analyze_response(user_input)
-    save_conversation_context(user_input, analysis)
+    # Next question
+    next_q = random.choice(questions[mode])
+    st.session_state.chat.append(("assistant", next_q))
+    st.rerun()
 
-    st.write("### 📊 Feedback")
-    st.json(analysis)
+# ---------- FEEDBACK SUMMARY ----------
+st.divider()
+st.subheader("📊 Live Feedback Summary")
 
-    # Generate next adaptive question
-    context = get_personalized_context()
-    next_q = generate_adaptive_question(context, user_input)
+if st.session_state.feedback:
+    last = st.session_state.feedback[-1]
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Tone", last["tone"])
+    col2.metric("Confidence (%)", f"{last['confidence']}")
+    col3.metric("Filler words", last["filler_words"])
 
-    st.chat_message("assistant").write(next_q)
-    st.session_state.messages.append({"role": "assistant", "content": next_q})
+    st.progress(last["confidence"] / 100)
+else:
+    st.info("Your feedback will appear here after your first answer.")
+
+# ---------- FOOTER ----------
+st.markdown("---")
+st.markdown(
+    "<p style='text-align:center;color:gray;'>🚀 Built with ❤️ by Team TechTitans | AI Hackathon 2025</p>",
+    unsafe_allow_html=True
+)
