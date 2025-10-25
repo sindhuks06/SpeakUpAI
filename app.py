@@ -3,10 +3,10 @@ from ai_logic import analyze_response, generate_adaptive_question
 from db_manager import get_personalized_context, save_conversation_context, transcribe_audio
 
 # --- Page config ---
-st.set_page_config(page_title="🎤 Rehearsal Room", page_icon="🎭")
+st.set_page_config(page_title="🎤 SpeakupAI", page_icon="🎭")
 
 # --- Title ---
-st.title("🎤 Rehearsal Room — Your AI Co-Interviewer")
+st.title("🎤 SpeakupAI — Your AI Co-Interviewer")
 
 # --- Initialize session state ---
 if "messages" not in st.session_state:
