@@ -1,5 +1,5 @@
-# RehearsalRoom
-# 💬 RehearsalRoom - AI Interviewer & Confidence Coach
+# SpeakupAI
+# 💬 SpeakupAI - AI Interviewer & Confidence Coach
 
 **Hackathon Project | 24-hour MVP**
 
@@ -7,7 +7,7 @@
 
 ## Overview
 
-RehearsalRoom is an AI-powered platform to help students and professionals practice interviews, presentations, and viva questions. It acts like a real interviewer and gives live feedback on tone, clarity, and confidence.
+SpeakupAI is an AI-powered platform to help students and professionals practice interviews, presentations, and viva questions. It acts like a real interviewer and gives live feedback on tone, clarity, and confidence.
 
 > Safe space to fail, learn, and improve.
 
