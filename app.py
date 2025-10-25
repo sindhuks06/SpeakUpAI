@@ -2,9 +2,8 @@ import streamlit as st
 from textblob import TextBlob
 import random
 from PyPDF2 import PdfReader
-from streamlit_webrtc import webrtc_streamer, WebRtcMode
-import numpy as np
-import av
+import os
+import json
 
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
@@ -13,10 +12,27 @@ st.set_page_config(
     layout="wide"
 )
 
+# ---------- USER DATA FILE ----------
+USER_DATA_FILE = "user_data.json"
+if os.path.exists(USER_DATA_FILE):
+    with open(USER_DATA_FILE, "r") as f:
+        user_data = json.load(f)
+else:
+    user_data = {}
+
+# ---------- SESSION STATE ----------
+if "user_name" not in st.session_state:
+    st.session_state.user_name = None
+if "chat" not in st.session_state:
+    st.session_state.chat = []
+if "feedback" not in st.session_state:
+    st.session_state.feedback = []
+if "session_count" not in st.session_state:
+    st.session_state.session_count = 0
+
 # ---------- CUSTOM CSS ----------
 st.markdown("""
 <style>
-/* Full page background image with gradient overlay */
 body {
     background: linear-gradient(rgba(0,0,0,0.3), rgba(0,0,0,0.3)),
                 url('https://images.unsplash.com/photo-1581091215361-2b61f1a4c64b?ixlib=rb-4.0.3&auto=format&fit=crop&w=1950&q=80');
@@ -26,7 +42,6 @@ body {
     background-position: center;
 }
 
-/* Header */
 .header {
     text-align:center;
     padding:20px;
@@ -45,39 +60,16 @@ body {
     margin-bottom:20px;
 }
 
-/* Chat bubbles */
-.chat-box {
+.login-box {
     background: rgba(255,255,255,0.9);
-    padding: 12px;
+    padding: 25px;
     border-radius: 20px;
-    margin-bottom: 12px;
-    display: flex;
-    align-items: center;
-    box-shadow: 0px 5px 15px rgba(0,0,0,0.2);
-    position: relative;
-}
-.chat-box::after {
-    content: "";
-    position: absolute;
-    bottom: -8px;
-    width: 10px; height: 10px;
-    background: inherit;
-    transform: rotate(45deg);
-}
-.assistant-msg {background:#d1c4e9;}
-.user-msg {background:#ffccbc; margin-left:auto;}
-.avatar {height:50px;width:50px;border-radius:50%;margin-right:10px;}
-
-/* Feedback box */
-.feedback-box {
-    background: rgba(255,255,255,0.95);
-    padding: 15px;
-    border-radius: 15px;
-    margin-bottom: 15px;
+    max-width: 400px;
+    margin: auto;
     box-shadow: 0px 5px 15px rgba(0,0,0,0.3);
+    text-align: center;
 }
 
-/* Footer */
 .footer {
     text-align:center;
     color:white;
@@ -85,12 +77,69 @@ body {
     font-weight:bold;
     font-size:1em;
 }
+
+.chat-box {
+    background: rgba(255,255,255,0.85);
+    border-radius: 15px;
+    padding: 10px;
+    margin-bottom: 10px;
+}
+
+.assistant-msg {
+    border-left: 4px solid #6a11cb;
+}
+
+.user-msg {
+    border-left: 4px solid #2575fc;
+}
+
+.feedback-box {
+    background: rgba(255,255,255,0.85);
+    border-radius: 15px;
+    padding: 10px;
+    margin-bottom: 10px;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- HEADER ----------
+# ---------- LOGIN PAGE ----------
+if st.session_state.user_name is None:
+    st.markdown('<div class="header">💬 SpeakUpAI</div>', unsafe_allow_html=True)
+    st.markdown('<div class="subheader">Your personal AI interviewer & confidence coach</div>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="login-box">', unsafe_allow_html=True)
+    st.subheader("👤 Login / Enter Your Name")
+    name_input = st.text_input("Enter your name to start:", "")
+    if st.button("Start Session"):
+        if name_input.strip() != "":
+            st.session_state.user_name = name_input.strip()
+
+            # Memory Echo
+            if st.session_state.user_name in user_data:
+                st.session_state.session_count = user_data[st.session_state.user_name]["session_count"] + 1
+                st.success(f"Welcome back {st.session_state.user_name}! 🎉 This is your session #{st.session_state.session_count}")
+            else:
+                st.session_state.session_count = 1
+                st.success(f"Welcome {st.session_state.user_name}! 🎉 Let's start your first session")
+
+            # Initialize user data
+            user_data[st.session_state.user_name] = {
+                "session_count": st.session_state.session_count,
+                "last_mode": None,
+                "last_resume": ""
+            }
+            with open(USER_DATA_FILE, "w") as f:
+                json.dump(user_data, f, indent=4)
+            
+            st.stop()  # replaces deprecated experimental_rerun
+        else:
+            st.error("Please enter a valid name.")
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.stop()
+
+# ---------- GREETING ----------
 st.markdown('<div class="header">💬 SpeakUpAI</div>', unsafe_allow_html=True)
-st.markdown('<div class="subheader">Your personal AI interviewer & confidence coach</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="subheader">Welcome back {st.session_state.user_name}! This is your session #{st.session_state.session_count}</div>', unsafe_allow_html=True)
 
 # ---------- RESUME UPLOAD ----------
 st.subheader("📄 Upload your resume (optional)")
@@ -103,12 +152,18 @@ if uploaded_file is not None:
         resume_text += page.extract_text()
     st.success("Resume uploaded successfully!")
     st.text_area("Resume Content Preview", resume_text, height=200)
+    user_data[st.session_state.user_name]["last_resume"] = resume_text
 
 # ---------- INTERVIEW MODE ----------
 mode = st.selectbox(
     "🎯 Choose interview mode:",
     ["HR Interview", "Technical Round", "Stress Interview"]
 )
+user_data[st.session_state.user_name]["last_mode"] = mode
+
+# Save JSON updates
+with open(USER_DATA_FILE, "w") as f:
+    json.dump(user_data, f, indent=4)
 
 st.divider()
 
@@ -118,12 +173,6 @@ questions = {
     "Technical Round": ["Explain OOP concepts in simple terms.", "What is a REST API?", "How does Python manage memory?"],
     "Stress Interview": ["Why are you not better than others?", "Convince me you’re not wasting my time.", "What will you do if your project fails?"]
 }
-
-# ---------- SESSION STATE ----------
-if "chat" not in st.session_state:
-    st.session_state.chat = []
-if "feedback" not in st.session_state:
-    st.session_state.feedback = []
 
 # ---------- ASK FIRST QUESTION ----------
 if len(st.session_state.chat) == 0:
@@ -136,14 +185,10 @@ for role, text in st.session_state.chat:
     cls = "assistant-msg" if role=="assistant" else "user-msg"
     st.markdown(f"""
         <div class="chat-box {cls}">
-            <img class="avatar" src="{avatar}">
-            <div>{text}</div>
+            <img class="avatar" src="{avatar}" style="width:25px;height:25px;margin-right:10px;vertical-align:middle;">
+            <span>{text}</span>
         </div>
     """, unsafe_allow_html=True)
-
-# ---------- VOICE INPUT ----------
-st.subheader("🎤 Speak your answer (optional)")
-webrtc_streamer(key="mic", mode=WebRtcMode.SENDONLY)
 
 # ---------- TEXT INPUT ----------
 prompt = st.chat_input("Or type your answer here...")
@@ -193,6 +238,7 @@ st.markdown("""
     font-weight: bold;
     z-index: 9999;
 ">
-🚀 Built with ❤ by Team TechTitans | TERRATHON 5.0  
+🚀 Built with ❤ by Team TechTitans | TERRATHON 5.0 2025
 </div>
 """, unsafe_allow_html=True)
+
