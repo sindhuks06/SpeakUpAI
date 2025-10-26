@@ -6,19 +6,18 @@ SpeakUpAI is an AI-powered speech therapy assistant that helps users practice pr
 
 ### 🎧 Voice Interaction
 - Users can **listen to each question** using built-in audio playback.
-- Clean and minimal audio player UI (no overlapping styles, fully visible).
+- Users can speak in answers.
 
 ### 🧠 Adaptive Questioning
-- Questions adjust dynamically based on the user's responses.
+- Questions adjust dynamically based on the user's resume.
 - Repetitive questions are avoided using session logic.
 - GPT-4o provides natural and context-aware evaluation.
 
 ### 📊 Smart Feedback
 - Feedback is personalized and focused on:
-  - Pronunciation
+  - Filler Words Used
+  - Sentiment Score
   - Tone
-  - Speed
-  - Structure
   - Confidence
 
 ### 🎨 Enhanced Modern UI/UX
