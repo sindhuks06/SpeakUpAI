@@ -1,45 +1,81 @@
-# SpeakupAI
-# 💬  SpeakupAI- AI Interviewer & Confidence Coach
+# 🎤 SpeakUpAI — Adaptive Speech Therapy Assistant
 
-**Hackathon Project | 24-hour MVP**
+SpeakUpAI is an AI-powered speech therapy assistant that helps users practice pronunciation, fluency, and confidence through adaptive questioning and real-time feedback. It is designed for use by speech therapists, students, and individuals practicing oral communication.
 
----
+## 🌟 Features
 
-## Overview
+### 🎧 Voice Interaction
+- Users can **listen to each question** using built-in audio playback.
+- Clean and minimal audio player UI (no overlapping styles, fully visible).
 
-SpeakupAI is an AI-powered platform to help students and professionals practice interviews, presentations, and viva questions. It acts like a real interviewer and gives live feedback on tone, clarity, and confidence.
+### 🧠 Adaptive Questioning
+- Questions adjust dynamically based on the user's responses.
+- Repetitive questions are avoided using session logic.
+- GPT-4o provides natural and context-aware evaluation.
 
-> Safe space to fail, learn, and improve.
+### 📊 Smart Feedback
+- Feedback is personalized and focused on:
+  - Pronunciation
+  - Tone
+  - Speed
+  - Structure
+  - Confidence
 
----
+### 🎨 Enhanced Modern UI/UX
+Recent UI improvements include:
 
-## Features (MVP)
-
-- Select interview type: HR / Technical / Stress
-- AI asks 3–5 questions dynamically
-- User responds via text (voice recording support optional)
-- Feedback summary:
-  - Tone analysis
-  - Filler words count
-  - Confidence score
-- AI-generated follow-up tips
-
----
-
-## Tech Stack
-
-- **Frontend:** Streamlit (interactive UI)
-- **Backend / AI:** Python
-- **APIs:** OpenAI GPT-4, Whisper
-- **Analysis:** TextBlob (tone, sentiment, filler words)
-- **Storage:** Local JSON (question bank)
-
-Optional / Stretch:
-- Tailwind CSS (UI polish)
-- Webcam emotion recognition (Mediapipe/OpenCV)
-- PDF export of feedback
+| Enhancement | Description |
+|------------|-------------|
+| ✅ Background image | Creates visual depth & brand identity |
+| ✅ Dark navy headings | High contrast and professional tone |
+| ✅ Hover animations | Smooth UI feedback for interaction |
+| ✅ Elevated cards | Clean container for content visibility |
+| ✅ Sticky header | Persistent title during scroll |
+| ✅ Improved fonts | Cleaner and more readable |
+| ✅ Better audio styling | Player is now clearly visible |
+| ✅ Soft shadows | Adds depth & premium feel |
 
 ---
 
-## Folder Structure
+## 🛠️ Tech Stack
 
+| Component | Technology |
+|----------|-------------|
+| Frontend | Streamlit (custom CSS for UI) |
+| Backend | Python |
+| AI Model | GPT-4o |
+| Audio | Streamlit native audio playback |
+| Session Logic | Python session state |
+
+---
+
+## 📂 Project Structure
+
+SpeakUpAI/
+│
+├── app.py
+├── ai_logic.py
+├── config.py
+├── db_manager.py
+├── analysis_schema.py
+├── system_prompts.py
+├── demo_reset.py
+├── transcribe_audio.py
+├── audio_utils.py
+├── user_data.json
+├── background.jpg
+├── test_p3.py
+│
+├── data/
+│   └── question_bank.json
+│
+├── utils/
+│   ├── ai_helpers.py
+│   └── feedback.py
+│
+├── assets/          (exists but currently unused?)
+│
+├── requirements.txt
+├── README.md
+├── .env
+└── __pycache__/
