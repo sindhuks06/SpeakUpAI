@@ -3,12 +3,12 @@ from textblob import TextBlob
 import re
 from typing import TypedDict
 
-# ---------------- CONSTANTS ----------------
-FILLER_WORDS = ["um", "uh", "like", "you know", "basically", "actually"]
+# ------------------- Constants -------------------
+FILLER_WORDS = ["um", "uh", "like", "you know", "basically", "actually", "literally"]
 HESITATION_PHRASES = ["i think", "maybe", "i guess", "probably", "i'm not sure", "kind of", "sort of"]
 CONFIDENT_PHRASES = ["i led", "i built", "i created", "i achieved", "i managed", "i improved", "i delivered"]
 
-# ---------------- TYPED DICT ----------------
+# ------------------- Typed Dict -------------------
 class Feedback(TypedDict):
     tone: str
     fillers: int
@@ -17,22 +17,24 @@ class Feedback(TypedDict):
     sentence_structure: str
     confidence_score: float
 
-# ---------------- ANALYSIS FUNCTION ----------------
+# ------------------- Analysis Function -------------------
 def analyze_text(text: str) -> Feedback:
-    """Analyze a user's spoken/written text and return feedback metrics."""
-    
-    text_lower = text.lower()
-    
-    # --- Filler Words ---
+    """
+    Analyze a user's answer and return structured feedback.
+    Works for both typed and transcribed audio text.
+    """
+    text_lower = text.lower().strip()
+
+    # --- Filler words count ---
     fillers_used = sum(text_lower.count(word) for word in FILLER_WORDS)
-    
-    # --- Hesitation ---
+
+    # --- Hesitation phrases count ---
     hesitation_count = sum(text_lower.count(phrase) for phrase in HESITATION_PHRASES)
-    
-    # --- Confident Language ---
+
+    # --- Confident phrases count ---
     confident_count = sum(text_lower.count(phrase) for phrase in CONFIDENT_PHRASES)
-    
-    # --- Sentiment Analysis ---
+
+    # --- Sentiment analysis ---
     sentiment = TextBlob(text).sentiment.polarity
     if sentiment > 0.25:
         tone = "Positive / Confident"
@@ -40,24 +42,26 @@ def analyze_text(text: str) -> Feedback:
         tone = "Negative / Uncertain"
     else:
         tone = "Neutral / Mixed"
-    
-    # --- Sentence Structure ---
+
+    # --- Sentence structure ---
     sentences = re.split(r"[.!?]", text)
-    sentences = [s.strip() for s in sentences if len(s.strip()) > 5]
+    sentences = [s.strip() for s in sentences if len(s.strip()) > 3]
     avg_sentence_len = sum(len(s.split()) for s in sentences) / max(1, len(sentences))
-    
     if avg_sentence_len > 18:
         structure = "Well-developed / Detailed"
     elif avg_sentence_len > 10:
         structure = "Decent / Clear"
     else:
         structure = "Brief / Could Elaborate More"
-    
-    # --- Confidence Score (0-100) ---
-    base_conf = (sentiment + 1) / 2 * 60  # 0-60 from sentiment
-    base_conf += confident_count * 8       # +8 per confident phrase
-    base_conf -= fillers_used * 5          # -5 per filler
-    base_conf -= hesitation_count * 6      # -6 per hesitation phrase
+
+    # --- Confidence score (0-100) ---
+    # Start with sentiment contribution
+    base_conf = (sentiment + 1) / 2 * 60  # maps [-1,1] to [0,60]
+    # Add weight for confident phrases
+    base_conf += confident_count * 8
+    # Subtract weight for fillers and hesitation
+    base_conf -= fillers_used * 5
+    base_conf -= hesitation_count * 6
     confidence_score = max(0, min(100, round(base_conf, 1)))
 
     return Feedback(
