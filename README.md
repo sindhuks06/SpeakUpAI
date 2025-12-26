@@ -45,6 +45,8 @@ Recent UI improvements include:
 | AI Model | GPT-4o |
 | Audio | Streamlit native audio playback |
 | Session Logic | Python session state |
+Contributor fork for portfolio visibility
+
 
 ---
 
